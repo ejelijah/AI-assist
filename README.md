@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Student AI Assistant
 
 A student-focused assistant that answers questions using web search results and
@@ -62,3 +63,4 @@ between devices.
 This is an early prototype, not a substitute for checking course materials or
 professional advice. Search results and generated explanations can be
 incomplete or incorrect. Avoid entering sensitive personal information.
+
