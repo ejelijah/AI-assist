@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 # Student AI Assistant
 
 A student-focused assistant that answers questions using web search results and
