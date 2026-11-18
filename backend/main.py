@@ -89,7 +89,7 @@ async def _generate_answer(
         )
 
     base_url = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    model = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b")
     source_text = "\n\n".join(
         f"[{index}] {source['title']}\nURL: {source['url']}\n"
         f"Excerpt: {source['snippet']}"

@@ -129,9 +129,9 @@ function validateRequest(payload) {
 }
 
 async function generateAnswer(question, sources, history, apiKey) {
-  const baseUrl = (process.env.GROQ_BASE_URL || "https://api.groq.com/openai/v1")
+  const baseUrl = (process.env.GROQ_BASE_URL?.trim() || "https://api.groq.com/openai/v1")
     .replace(/\/+$/, "");
-  const model = process.env.GROQ_MODEL || "llama-3.3-70b-versatile";
+  const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-20b";
   const sourceText = sources.length
     ? sources.map((source, index) => (
       `[${index + 1}] ${source.title}\nURL: ${source.url}\nExcerpt: ${source.snippet}`

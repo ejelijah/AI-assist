@@ -53,7 +53,9 @@ test("chat function includes web sources and conversation history", async () => 
     }
 
     assert.equal(options.headers.Authorization, "Bearer test-key");
+    assert.equal(String(input), "https://api.groq.com/openai/v1/chat/completions");
     groqPayload = JSON.parse(options.body);
+    assert.equal(groqPayload.model, "openai/gpt-oss-20b");
     return new Response(
       JSON.stringify({
         choices: [{ message: { content: "Try the campus tutoring center [1]." } }],
