@@ -16,6 +16,7 @@ import ChatView from "./components/ChatView.jsx";
 import DashboardView from "./components/DashboardView.jsx";
 import FocusView from "./components/FocusView.jsx";
 import PlannerView from "./components/PlannerView.jsx";
+import { advanceFocus, normalizeFocusState, transitionFocus } from "./lib/focusTimer.js";
 import {
   createDemoMeetings,
   createDemoTasks,
@@ -31,8 +32,6 @@ import {
   writeJson,
 } from "./lib/studyData.js";
 
-const FOCUS_DURATION = 25 * 60;
-const BREAK_DURATION = 5 * 60;
 const NAV_ITEMS = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
   { id: "chat", label: "AI assistant", icon: MessageCircle },
@@ -57,25 +56,7 @@ function updateSession(sessions, id, update) {
 }
 
 function initialFocus() {
-  const saved = readJson(STORAGE.focus, null);
-  if (!saved || typeof saved !== "object") {
-    return {
-      status: "idle",
-      remainingSeconds: FOCUS_DURATION,
-      endsAt: null,
-      selectedTaskId: "",
-      completedSessions: 0,
-    };
-  }
-  return {
-    status: ["idle", "focus", "paused_focus", "break", "paused_break"].includes(saved.status)
-      ? saved.status
-      : "idle",
-    remainingSeconds: Number.isFinite(saved.remainingSeconds) ? saved.remainingSeconds : FOCUS_DURATION,
-    endsAt: Number.isFinite(saved.endsAt) ? saved.endsAt : null,
-    selectedTaskId: typeof saved.selectedTaskId === "string" ? saved.selectedTaskId : "",
-    completedSessions: Number.isFinite(saved.completedSessions) ? saved.completedSessions : 0,
-  };
+  return normalizeFocusState(readJson(STORAGE.focus, null));
 }
 
 function initialDemoList(key, factory, normalizer) {
@@ -167,38 +148,7 @@ export default function App() {
   }, [toast]);
 
   useEffect(() => {
-    const interval = window.setInterval(() => {
-      setFocus((current) => {
-        if (current.status !== "focus" && current.status !== "break") return current;
-        const now = Date.now();
-        const remaining = Math.max(0, Math.ceil((current.endsAt - now) / 1000));
-        if (remaining > 0) {
-          return remaining === current.remainingSeconds
-            ? current
-            : { ...current, remainingSeconds: remaining };
-        }
-        if (current.status === "focus") {
-          const breakEndsAt = current.endsAt + BREAK_DURATION * 1000;
-          if (now >= breakEndsAt) {
-            return {
-              ...current,
-              status: "idle",
-              remainingSeconds: FOCUS_DURATION,
-              endsAt: null,
-              completedSessions: current.completedSessions + 1,
-            };
-          }
-          return {
-            ...current,
-            status: "break",
-            remainingSeconds: Math.ceil((breakEndsAt - now) / 1000),
-            endsAt: breakEndsAt,
-            completedSessions: current.completedSessions + 1,
-          };
-        }
-        return { ...current, status: "idle", remainingSeconds: FOCUS_DURATION, endsAt: null };
-      });
-    }, 1000);
+    const interval = window.setInterval(() => setFocus((current) => advanceFocus(current)), 1000);
     return () => window.clearInterval(interval);
   }, []);
 
@@ -390,34 +340,7 @@ export default function App() {
   }
 
   function updateFocus(action) {
-    setFocus((current) => {
-      const now = Date.now();
-      if (action.type === "select-task") {
-        if (current.status === "focus" || current.status === "break") return current;
-        return { ...current, selectedTaskId: action.taskId };
-      }
-      if (action.type === "start") {
-        const status = current.status === "paused_break" ? "break" : "focus";
-        const seconds = current.remainingSeconds || (status === "break" ? BREAK_DURATION : FOCUS_DURATION);
-        return { ...current, status, remainingSeconds: seconds, endsAt: now + seconds * 1000 };
-      }
-      if (action.type === "pause" && (current.status === "focus" || current.status === "break")) {
-        return {
-          ...current,
-          status: current.status === "focus" ? "paused_focus" : "paused_break",
-          remainingSeconds: Math.max(0, Math.ceil((current.endsAt - now) / 1000)),
-          endsAt: null,
-        };
-      }
-      if (action.type === "resume" && (current.status === "paused_focus" || current.status === "paused_break")) {
-        const status = current.status === "paused_focus" ? "focus" : "break";
-        return { ...current, status, endsAt: now + current.remainingSeconds * 1000 };
-      }
-      if (action.type === "reset") {
-        return { ...current, status: "idle", remainingSeconds: FOCUS_DURATION, endsAt: null };
-      }
-      return current;
-    });
+    setFocus((current) => transitionFocus(current, action));
   }
 
   function toggleDemo() {
