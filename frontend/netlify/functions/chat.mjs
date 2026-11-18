@@ -8,6 +8,13 @@ const SYSTEM_PROMPT = [
   "Use the conversation history to understand follow-up questions.",
 ].join(" ");
 
+class UpstreamError extends Error {
+  constructor(message, statusCode = 502) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 function jsonResponse(statusCode, body) {
   return {
     statusCode,
@@ -147,22 +154,40 @@ async function generateAnswer(question, sources, history, apiKey) {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ model, temperature: 0.2, messages }),
-      signal: AbortSignal.timeout(6500),
+      signal: AbortSignal.timeout(30000),
     });
-  } catch {
-    throw new Error("The configured AI service could not complete the request.");
+  } catch (error) {
+    if (error instanceof Error && error.name === "TimeoutError") {
+      throw new UpstreamError("Groq took too long to respond. Please try again.", 504);
+    }
+    throw new UpstreamError("Could not reach Groq. Check its status and try again.");
   }
-  if (!response.ok) throw new Error("The configured AI service could not complete the request.");
+  if (!response.ok) {
+    console.error("Groq chat completion failed with HTTP", response.status);
+    if (response.status === 401 || response.status === 403) {
+      throw new UpstreamError("Groq rejected the API key. Check GROQ_API_KEY in Netlify.");
+    }
+    if (response.status === 404) {
+      throw new UpstreamError("Groq could not find the configured model or API endpoint. Check GROQ_MODEL and GROQ_BASE_URL.");
+    }
+    if (response.status === 429) {
+      throw new UpstreamError("Groq rate limit or usage quota reached. Check your Groq account.");
+    }
+    if (response.status >= 500) {
+      throw new UpstreamError("Groq is temporarily unavailable. Please try again.");
+    }
+    throw new UpstreamError("Groq rejected the request. Check that GROQ_MODEL is valid.");
+  }
 
   let data;
   try {
     data = await response.json();
   } catch {
-    throw new Error("The AI service returned an unexpected response.");
+    throw new UpstreamError("Groq returned an unexpected response.");
   }
   const answer = data?.choices?.[0]?.message?.content;
   if (typeof answer !== "string" || !answer.trim()) {
-    throw new Error("The AI service returned an unexpected response.");
+    throw new UpstreamError("Groq returned an unexpected response.");
   }
   return answer.trim();
 }
@@ -206,10 +231,9 @@ export async function handler(event) {
     );
     return jsonResponse(200, { answer, sources });
   } catch (error) {
-    const detail = error instanceof Error
-      && error.message === "The configured AI service could not complete the request."
-      ? error.message
-      : "The AI service returned an unexpected response.";
-    return jsonResponse(502, { detail });
+    const upstreamError = error instanceof UpstreamError
+      ? error
+      : new UpstreamError("Groq returned an unexpected response.");
+    return jsonResponse(upstreamError.statusCode, { detail: upstreamError.message });
   }
 }

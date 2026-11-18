@@ -80,3 +80,23 @@ test("chat function includes web sources and conversation history", async () => 
     content: "I am a student.",
   });
 });
+
+test("chat function explains when Groq rejects the API key", async () => {
+  process.env.GROQ_API_KEY = "test-key";
+  globalThis.fetch = async (input) => {
+    if (String(input).startsWith("https://html.duckduckgo.com/")) {
+      return new Response("", { status: 200 });
+    }
+    return new Response(JSON.stringify({ error: { message: "Unauthorized" } }), {
+      status: 401,
+    });
+  };
+
+  const response = await handler(request({ question: "Help me plan my day" }));
+
+  assert.equal(response.statusCode, 502);
+  assert.equal(
+    JSON.parse(response.body).detail,
+    "Groq rejected the API key. Check GROQ_API_KEY in Netlify.",
+  );
+});
