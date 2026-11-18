@@ -1,11 +1,20 @@
 const SYSTEM_PROMPT = [
-  "You are a supportive assistant for everyday student life.",
-  "Help with learning, time management, planning daily activities, and finding student or campus resources.",
-  "Be concise, empathetic, and nonjudgmental.",
-  "Do not diagnose or treat health conditions. Explain concepts clearly.",
-  "Use the supplied web results as evidence, cite claims with source numbers like [1],",
-  "and say when the sources do not establish an answer. Do not invent citations.",
-  "Use the conversation history to understand follow-up questions.",
+  "You are a supportive assistant for everyday student life. Help with learning, time management,",
+  "daily planning, and finding student or campus resources. Be concise, empathetic, and nonjudgmental.",
+  "Do not diagnose or treat health conditions. Use the supplied web results as evidence, cite factual",
+  "claims with source numbers like [1], and never invent sources or citations.",
+  "Return a JSON object with exactly these keys: answer, taskSuggestions, scheduleSuggestions.",
+  "answer is a helpful Markdown string. taskSuggestions is an array of actionable tasks, each with",
+  "title, description, priority (low, medium, or high), and dueDate (YYYY-MM-DD or null).",
+  "Only include task suggestions when the conversation asks for planning, prioritizing, or actionable",
+  "next steps. Never invent deadlines; use a due date only when the student explicitly provided one",
+  "or it appears in the supplied planner context. Otherwise use null.",
+  "scheduleSuggestions is an array of proposed calendar blocks, each with title, description, date",
+  "(YYYY-MM-DD), time (24-hour HH:MM), and duration (minutes). Only return these for a day-planning",
+  "request. Respect existing events and task deadlines in the planner context; do not overlap events.",
+  "Suggested times are proposals for the student to review, not existing events.",
+  "Use empty arrays when there are no suitable actions. Do not add any text outside the JSON object.",
+  "Use conversation history to understand follow-up questions.",
 ].join(" ");
 
 class UpstreamError extends Error {
@@ -125,10 +134,71 @@ function validateRequest(payload) {
     }
   }
 
+  if (payload.intent !== undefined && !["chat", "plan_day"].includes(payload.intent)) {
+    return "Intent must be chat or plan_day.";
+  }
+  if (payload.plannerContext !== undefined) {
+    const context = payload.plannerContext;
+    if (
+      !context
+      || typeof context !== "object"
+      || typeof context.today !== "string"
+      || !Array.isArray(context.tasks)
+      || !Array.isArray(context.events)
+      || context.tasks.length > 50
+      || context.events.length > 50
+    ) {
+      return "Planner context must include a date and task and event lists.";
+    }
+  }
+
   return null;
 }
 
-async function generateAnswer(question, sources, history, apiKey) {
+function cleanTaskSuggestions(items) {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0, 10).flatMap((item) => {
+    if (!item || typeof item.title !== "string" || !item.title.trim()) return [];
+    const priority = ["low", "medium", "high"].includes(item.priority) ? item.priority : "medium";
+    const dueDate = typeof item.dueDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate)
+      ? item.dueDate
+      : null;
+    return [{
+      title: item.title.trim().slice(0, 120),
+      description: typeof item.description === "string" ? item.description.slice(0, 500) : "",
+      priority,
+      dueDate,
+    }];
+  });
+}
+
+function cleanScheduleSuggestions(items) {
+  if (!Array.isArray(items)) return [];
+  return items.slice(0, 10).flatMap((item) => {
+    if (
+      !item
+      || typeof item.title !== "string"
+      || !item.title.trim()
+      || typeof item.date !== "string"
+      || !/^\d{4}-\d{2}-\d{2}$/.test(item.date)
+      || typeof item.time !== "string"
+      || !/^([01]\d|2[0-3]):[0-5]\d$/.test(item.time)
+    ) {
+      return [];
+    }
+    const duration = Number(item.duration);
+    if (!Number.isInteger(duration) || duration < 15 || duration > 180) return [];
+    return [{
+      title: item.title.trim().slice(0, 120),
+      description: typeof item.description === "string" ? item.description.slice(0, 500) : "",
+      date: item.date,
+      time: item.time,
+      duration,
+    }];
+  });
+}
+
+async function generateAnswer(question, sources, history, apiKey, intent, plannerContext) {
   const baseUrl = (process.env.GROQ_BASE_URL?.trim() || "https://api.groq.com/openai/v1")
     .replace(/\/+$/, "");
   const model = process.env.GROQ_MODEL?.trim() || "openai/gpt-oss-20b";
@@ -145,6 +215,15 @@ async function generateAnswer(question, sources, history, apiKey) {
       content: `Student question:\n${question}\n\nWeb results:\n${sourceText}`,
     },
   ];
+  if (intent === "plan_day" && plannerContext) {
+    messages.splice(1, 0, {
+      role: "system",
+      content: `Student's local planning context for ${plannerContext.today}:\n${JSON.stringify({
+        tasks: plannerContext.tasks,
+        events: plannerContext.events,
+      })}`,
+    });
+  }
   let response;
   try {
     response = await fetch(`${baseUrl}/chat/completions`, {
@@ -153,7 +232,12 @@ async function generateAnswer(question, sources, history, apiKey) {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ model, temperature: 0.2, messages }),
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages,
+      }),
       signal: AbortSignal.timeout(30000),
     });
   } catch (error) {
@@ -185,11 +269,24 @@ async function generateAnswer(question, sources, history, apiKey) {
   } catch {
     throw new UpstreamError("Groq returned an unexpected response.");
   }
-  const answer = data?.choices?.[0]?.message?.content;
-  if (typeof answer !== "string" || !answer.trim()) {
+  const content = data?.choices?.[0]?.message?.content;
+  if (typeof content !== "string" || !content.trim()) {
     throw new UpstreamError("Groq returned an unexpected response.");
   }
-  return answer.trim();
+  let result;
+  try {
+    result = JSON.parse(content);
+  } catch {
+    throw new UpstreamError("Groq returned an unexpected response.");
+  }
+  if (typeof result.answer !== "string" || !result.answer.trim()) {
+    throw new UpstreamError("Groq returned an unexpected response.");
+  }
+  return {
+    answer: result.answer.trim(),
+    taskSuggestions: cleanTaskSuggestions(result.taskSuggestions),
+    scheduleSuggestions: intent === "plan_day" ? cleanScheduleSuggestions(result.scheduleSuggestions) : [],
+  };
 }
 
 export async function handler(event) {
@@ -213,23 +310,27 @@ export async function handler(event) {
     return jsonResponse(503, { detail: "Set GROQ_API_KEY to enable AI answers." });
   }
 
-  let sources;
-  try {
-    sources = await searchWeb(payload.question.trim());
-  } catch {
-    return jsonResponse(502, {
-      detail: "Web search failed. Check your internet connection and try again.",
-    });
+  let sources = [];
+  if ((payload.intent || "chat") !== "plan_day") {
+    try {
+      sources = await searchWeb(payload.question.trim());
+    } catch {
+      return jsonResponse(502, {
+        detail: "Web search failed. Check your internet connection and try again.",
+      });
+    }
   }
 
   try {
-    const answer = await generateAnswer(
+    const result = await generateAnswer(
       payload.question.trim(),
       sources,
       payload.history,
       apiKey,
+      payload.intent || "chat",
+      payload.plannerContext,
     );
-    return jsonResponse(200, { answer, sources });
+    return jsonResponse(200, { ...result, sources });
   } catch (error) {
     const upstreamError = error instanceof UpstreamError
       ? error

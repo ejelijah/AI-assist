@@ -56,9 +56,23 @@ test("chat function includes web sources and conversation history", async () => 
     assert.equal(String(input), "https://api.groq.com/openai/v1/chat/completions");
     groqPayload = JSON.parse(options.body);
     assert.equal(groqPayload.model, "openai/gpt-oss-20b");
+    assert.deepEqual(groqPayload.response_format, { type: "json_object" });
     return new Response(
       JSON.stringify({
-        choices: [{ message: { content: "Try the campus tutoring center [1]." } }],
+        choices: [{
+          message: {
+            content: JSON.stringify({
+              answer: "Try the campus tutoring center [1].",
+              taskSuggestions: [{
+                title: "Review campus tutoring options",
+                description: "Compare the available subjects and hours.",
+                priority: "medium",
+                dueDate: null,
+              }],
+              scheduleSuggestions: [],
+            }),
+          },
+        }],
       }),
       { status: 200 },
     );
@@ -72,6 +86,7 @@ test("chat function includes web sources and conversation history", async () => 
 
   assert.equal(response.statusCode, 200);
   assert.equal(body.answer, "Try the campus tutoring center [1].");
+  assert.equal(body.taskSuggestions[0].title, "Review campus tutoring options");
   assert.deepEqual(body.sources, [{
     title: "Campus study resources",
     url: "https://example.edu/study",
@@ -101,4 +116,50 @@ test("chat function explains when Groq rejects the API key", async () => {
     JSON.parse(response.body).detail,
     "Groq rejected the API key. Check GROQ_API_KEY in Netlify.",
   );
+});
+
+test("day planning uses local calendar context and returns proposed blocks", async () => {
+  process.env.GROQ_API_KEY = "test-key";
+  let calledGroq = false;
+  globalThis.fetch = async (input, options) => {
+    assert.equal(String(input), "https://api.groq.com/openai/v1/chat/completions");
+    calledGroq = true;
+    const body = JSON.parse(options.body);
+    assert.equal(body.messages[1].role, "system");
+    assert.match(body.messages[1].content, /Biology lecture/);
+    return new Response(JSON.stringify({
+      choices: [{
+        message: {
+          content: JSON.stringify({
+            answer: "Here is a proposed plan.",
+            taskSuggestions: [],
+            scheduleSuggestions: [{
+              title: "Review biology notes",
+              description: "Focus on the lecture topics.",
+              date: "2026-11-18",
+              time: "15:00",
+              duration: 45,
+            }],
+          }),
+        },
+      }],
+    }), { status: 200 });
+  };
+
+  const response = await handler(request({
+    question: "Plan my day",
+    intent: "plan_day",
+    plannerContext: {
+      today: "2026-11-18",
+      tasks: [{ title: "Review biology notes", priority: "high", dueDate: "2026-11-19", done: false }],
+      events: [{ title: "Biology lecture", date: "2026-11-18", time: "10:00", duration: 60 }],
+    },
+    history: [],
+  }));
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(calledGroq, true);
+  assert.equal(body.scheduleSuggestions[0].time, "15:00");
+  assert.deepEqual(body.sources, []);
 });

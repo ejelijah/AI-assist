@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 from pathlib import Path
 from typing import Any, Literal
@@ -8,7 +9,7 @@ from ddgs import DDGS
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -38,6 +39,10 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
     history: list[ChatMessage] = Field(default_factory=list, max_length=20)
+    intent: Literal["chat", "plan_day"] = "chat"
+    planner_context: dict[str, Any] | None = Field(default=None, alias="plannerContext")
+
+    model_config = ConfigDict(populate_by_name=True)
 
     @field_validator("question")
     @classmethod
@@ -54,9 +59,38 @@ class Source(BaseModel):
     snippet: str
 
 
+class TaskSuggestion(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    priority: Literal["low", "medium", "high"] = "medium"
+    due_date: str | None = Field(default=None, alias="dueDate")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class ScheduleSuggestion(BaseModel):
+    title: str = Field(min_length=1, max_length=120)
+    description: str = Field(default="", max_length=500)
+    date: str
+    time: str
+    duration: int = Field(ge=15, le=180)
+
+
+class ModelAnswer(BaseModel):
+    answer: str = Field(min_length=1)
+    task_suggestions: list[TaskSuggestion] = Field(default_factory=list, alias="taskSuggestions")
+    schedule_suggestions: list[ScheduleSuggestion] = Field(default_factory=list, alias="scheduleSuggestions")
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
 class ChatResponse(BaseModel):
     answer: str
     sources: list[Source]
+    task_suggestions: list[TaskSuggestion] = Field(default_factory=list, alias="taskSuggestions")
+    schedule_suggestions: list[ScheduleSuggestion] = Field(default_factory=list, alias="scheduleSuggestions")
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 def _search_web(question: str) -> list[dict[str, str]]:
@@ -80,7 +114,9 @@ async def _generate_answer(
     question: str,
     sources: list[dict[str, str]],
     history: list[ChatMessage],
-) -> str:
+    intent: str = "chat",
+    planner_context: dict[str, Any] | None = None,
+) -> ModelAnswer:
     api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise HTTPException(
@@ -102,15 +138,22 @@ async def _generate_answer(
         {
             "role": "system",
             "content": (
-                "You are a supportive assistant for everyday student life. "
-                "Help with learning, time management, planning daily activities, "
-                "and finding student or campus resources. Be concise, empathetic, "
-                "and nonjudgmental. "
-                "Do not diagnose or treat health conditions. Explain concepts "
-                "clearly. Use the supplied web results as evidence, "
-                "cite claims with source numbers like [1], and say when the "
-                "sources do not establish an answer. Do not invent citations. "
-                "Use the conversation history to understand follow-up questions."
+                "You are a supportive assistant for everyday student life. Help with learning, "
+                "time management, daily planning, and finding student or campus resources. "
+                "Be concise, empathetic, and nonjudgmental. Do not diagnose or treat health "
+                "conditions. Cite factual claims with supplied web source numbers like [1]; "
+                "never invent sources or citations. Return a JSON object with exactly these "
+                "keys: answer, taskSuggestions, scheduleSuggestions. answer is helpful Markdown. "
+                "taskSuggestions is an array of actionable tasks with title, description, "
+                "priority (low, medium, high), and dueDate (YYYY-MM-DD or null). Only suggest "
+                "tasks for planning/prioritizing requests. Never invent deadlines; use a date "
+                "only when supplied by the student or planner context, otherwise null. "
+                "scheduleSuggestions is an array of proposed calendar blocks with title, "
+                "description, date (YYYY-MM-DD), time (24-hour HH:MM), and duration in minutes. "
+                "Only return schedule blocks for a day-planning request. Respect existing events "
+                "and task deadlines; do not overlap events. Proposed times are for student review, "
+                "not existing events. Use empty arrays when there are no suitable actions. "
+                "Return no text outside the JSON object. Use conversation history for follow-ups."
             ),
         },
         *[
@@ -122,9 +165,22 @@ async def _generate_answer(
             "content": f"Student question:\n{question}\n\nWeb results:\n{source_text}",
         },
     ]
+    if intent == "plan_day" and planner_context is not None:
+        messages.insert(
+            1,
+            {
+                "role": "system",
+                "content": (
+                    "Student's local planning context for "
+                    f"{planner_context.get('today', '')}:\n"
+                    f"{json.dumps(planner_context, ensure_ascii=False)}"
+                ),
+            },
+        )
     payload: dict[str, Any] = {
         "model": model,
         "temperature": 0.2,
+        "response_format": {"type": "json_object"},
         "messages": messages,
     }
 
@@ -149,19 +205,31 @@ async def _generate_answer(
         ) from exc
 
     try:
-        answer = data["choices"][0]["message"]["content"]
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
         raise HTTPException(
             status_code=502,
             detail="The AI service returned an unexpected response.",
         ) from exc
 
-    if not isinstance(answer, str) or not answer.strip():
+    if not isinstance(content, str) or not content.strip():
         raise HTTPException(
             status_code=502,
             detail="The AI service returned an empty answer.",
         )
-    return answer.strip()
+    try:
+        result = ModelAnswer.model_validate_json(content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="The AI service returned an unexpected response.",
+        ) from exc
+    if not result.answer.strip():
+        raise HTTPException(
+            status_code=502,
+            detail="The AI service returned an empty answer.",
+        )
+    return result.model_copy(update={"answer": result.answer.strip()})
 
 
 @app.get("/api/health")
@@ -171,13 +239,28 @@ async def health() -> dict[str, str]:
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest) -> ChatResponse:
-    try:
-        sources = await asyncio.to_thread(_search_web, request.question)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="Web search failed. Check your internet connection and try again.",
-        ) from exc
+    sources: list[dict[str, str]] = []
+    if request.intent != "plan_day":
+        try:
+            sources = await asyncio.to_thread(_search_web, request.question)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Web search failed. Check your internet connection and try again.",
+            ) from exc
 
-    answer = await _generate_answer(request.question, sources, request.history)
-    return ChatResponse(answer=answer, sources=sources)
+    result = await _generate_answer(
+        request.question,
+        sources,
+        request.history,
+        request.intent,
+        request.planner_context,
+    )
+    return ChatResponse(
+        answer=result.answer,
+        sources=sources,
+        task_suggestions=result.task_suggestions,
+        schedule_suggestions=(
+            result.schedule_suggestions if request.intent == "plan_day" else []
+        ),
+    )
