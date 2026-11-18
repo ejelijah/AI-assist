@@ -3,10 +3,28 @@ import React, { useEffect, useRef, useState } from "react";
 const CHAT_STORAGE_KEY = "study-compass-chat-sessions-v1";
 const MEETING_STORAGE_KEY = "study-compass-meetings-v1";
 const TASK_STORAGE_KEY = "study-compass-tasks";
+const BUDGET_ENTRIES_KEY = "study-compass-budget-entries-v1";
+const BUDGET_SETTINGS_KEY = "study-compass-budget-settings-v1";
+const EXPENSE_CATEGORIES = [
+  "Food & groceries",
+  "Housing",
+  "Transportation",
+  "Books & supplies",
+  "Phone & internet",
+  "Health & personal care",
+  "Entertainment",
+  "Other",
+];
+const INCOME_CATEGORIES = [
+  "Part-time job",
+  "Scholarship / aid",
+  "Family support",
+  "Other income",
+];
 const SUGGESTIONS = [
   "Help me understand a difficult topic",
-  "Find reliable sources for a research question",
-  "Help me plan my study week",
+  "Help me make a manageable plan for a busy week",
+  "Find student resources for budgeting and financial aid",
 ];
 
 function createId() {
@@ -32,6 +50,25 @@ function readList(key) {
   } catch {
     return [];
   }
+}
+
+function readObject(key, fallback) {
+  try {
+    const saved = JSON.parse(localStorage.getItem(key) || "null");
+    return saved && typeof saved === "object" && !Array.isArray(saved)
+      ? saved
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function formatMoney(value, currency) {
+  return new Intl.NumberFormat(undefined, {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function dateKey(date) {
@@ -116,10 +153,10 @@ function ChatView({
     <section className="chat-workspace">
       <div className="chat-intro">
         <div>
-          <p className="eyebrow">YOUR STUDY COMPANION</p>
+          <p className="eyebrow">YOUR STUDENT WELLBEING COMPANION</p>
           <h1>{session.messages.length ? session.title : "What can I help you explore?"}</h1>
           <p className="muted">
-            Ask follow-up questions, explore the web, and get useful sources along the way.
+            Get support for study, time, and student-life questions—with sources when you need them.
           </p>
         </div>
         <div className="search-status"><span /> Web search on</div>
@@ -130,7 +167,7 @@ function ChatView({
           <div className="welcome-card">
             <div className="welcome-icon" aria-hidden="true">✳</div>
             <p className="welcome-title">A good place to start</p>
-            <p className="muted">Ask anything you’re learning. I’ll search for helpful sources.</p>
+            <p className="muted">Ask what’s on your mind. I’ll look for helpful, trustworthy starting points.</p>
             <div className="suggestion-list">
               {SUGGESTIONS.map((suggestion) => (
                 <button key={suggestion} onClick={() => onSend(suggestion)}>
@@ -489,6 +526,333 @@ function CalendarView({ meetings, onMeetingsChange }) {
   );
 }
 
+function BudgetView() {
+  const [entries, setEntries] = useState(() => readList(BUDGET_ENTRIES_KEY));
+  const [settings, setSettings] = useState(() => readObject(
+    BUDGET_SETTINGS_KEY,
+    { currency: "USD", monthlyLimits: {} },
+  ));
+  const [selectedMonth, setSelectedMonth] = useState(() => dateKey(new Date()).slice(0, 7));
+  const [limitDraft, setLimitDraft] = useState("");
+  const [entryType, setEntryType] = useState("expense");
+  const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
+  const [amount, setAmount] = useState("");
+  const [description, setDescription] = useState("");
+  const [entryDate, setEntryDate] = useState(() => dateKey(new Date()));
+  const [formError, setFormError] = useState("");
+
+  useEffect(() => {
+    localStorage.setItem(BUDGET_ENTRIES_KEY, JSON.stringify(entries));
+  }, [entries]);
+
+  useEffect(() => {
+    localStorage.setItem(BUDGET_SETTINGS_KEY, JSON.stringify(settings));
+  }, [settings]);
+
+  const currency = settings.currency || "USD";
+  const monthlyLimit = Number(settings.monthlyLimits?.[selectedMonth] || 0);
+  const monthEntries = entries
+    .filter((entry) => entry.date?.slice(0, 7) === selectedMonth)
+    .sort((a, b) => `${b.date} ${b.createdAt}`.localeCompare(`${a.date} ${a.createdAt}`));
+  const income = monthEntries
+    .filter((entry) => entry.type === "income")
+    .reduce((total, entry) => total + Number(entry.amount), 0);
+  const spending = monthEntries
+    .filter((entry) => entry.type === "expense")
+    .reduce((total, entry) => total + Number(entry.amount), 0);
+  const balance = income - spending;
+  const spendingProgress = monthlyLimit > 0
+    ? Math.min((spending / monthlyLimit) * 100, 100)
+    : 0;
+  const spendingByCategory = EXPENSE_CATEGORIES
+    .map((name) => ({
+      name,
+      total: monthEntries
+        .filter((entry) => entry.type === "expense" && entry.category === name)
+        .reduce((total, entry) => total + Number(entry.amount), 0),
+    }))
+    .filter((item) => item.total > 0)
+    .sort((a, b) => b.total - a.total);
+  const monthLabel = new Date(`${selectedMonth}-01T00:00:00`).toLocaleDateString(
+    undefined,
+    { month: "long", year: "numeric" },
+  );
+
+  function changeMonth(value) {
+    if (!value) return;
+    setSelectedMonth(value);
+    setLimitDraft(settings.monthlyLimits?.[value]?.toString() || "");
+    setEntryDate(`${value}-01`);
+  }
+
+  function saveMonthlyLimit(event) {
+    event.preventDefault();
+    const parsed = Number(limitDraft);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setFormError("Enter a monthly spending plan greater than zero.");
+      return;
+    }
+    setSettings((current) => ({
+      ...current,
+      monthlyLimits: { ...current.monthlyLimits, [selectedMonth]: parsed },
+    }));
+    setFormError("");
+  }
+
+  function addEntry(event) {
+    event.preventDefault();
+    const parsedAmount = Number(amount);
+    if (!Number.isFinite(parsedAmount) || parsedAmount <= 0 || !entryDate) {
+      setFormError("Enter a valid amount and date.");
+      return;
+    }
+    setEntries((current) => [
+      ...current,
+      {
+        id: createId(),
+        type: entryType,
+        category,
+        amount: parsedAmount,
+        description: description.trim(),
+        date: entryDate,
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    setAmount("");
+    setDescription("");
+    setFormError("");
+  }
+
+  return (
+    <section className="budget-view">
+      <div className="page-heading budget-heading">
+        <div>
+          <p className="eyebrow">MONEY IS PART OF WELLBEING</p>
+          <h1>Student budget</h1>
+          <p className="muted">A private, judgment-free way to plan spending and keep track of what comes in.</p>
+        </div>
+        <label className="currency-select">
+          Currency
+          <select
+            aria-label="Budget currency"
+            onChange={(event) => setSettings((current) => ({ ...current, currency: event.target.value }))}
+            value={currency}
+          >
+            {["USD", "CAD", "AUD", "GBP", "EUR", "NGN", "INR"].map((code) => (
+              <option key={code} value={code}>{code}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div className="budget-month-row">
+        <label>
+          Month
+          <input onChange={(event) => changeMonth(event.target.value)} type="month" value={selectedMonth} />
+        </label>
+        <span className="budget-local-note"><span /> Saved on this device only</span>
+      </div>
+
+      <div className="budget-summary">
+        <article className="budget-stat">
+          <span className="budget-stat-icon income-icon" aria-hidden="true">↓</span>
+          <div><p>Money in</p><strong>{formatMoney(income, currency)}</strong><small>Income recorded this month</small></div>
+        </article>
+        <article className="budget-stat">
+          <span className="budget-stat-icon spend-icon" aria-hidden="true">↗</span>
+          <div><p>Money out</p><strong>{formatMoney(spending, currency)}</strong><small>Spending recorded this month</small></div>
+        </article>
+        <article className={`budget-stat ${balance < 0 ? "negative-stat" : ""}`}>
+          <span className="budget-stat-icon balance-icon" aria-hidden="true">◉</span>
+          <div><p>Left after spending</p><strong>{formatMoney(balance, currency)}</strong><small>Income minus recorded spending</small></div>
+        </article>
+      </div>
+
+      <div className="budget-main-grid">
+        <div className="budget-primary-column">
+          <section className="budget-panel spending-plan-panel">
+            <div className="budget-panel-heading">
+              <div><p className="eyebrow">A GENTLE CHECK-IN</p><h2>Your spending plan</h2></div>
+              <span className="budget-panel-mark" aria-hidden="true">◷</span>
+            </div>
+            {monthlyLimit > 0 ? (
+              <>
+                <div className="spending-plan-totals">
+                  <strong>{formatMoney(spending, currency)} <span>of {formatMoney(monthlyLimit, currency)}</span></strong>
+                  <button onClick={() => setLimitDraft(monthlyLimit.toString())}>Edit plan</button>
+                </div>
+                <div
+                  aria-label={`${Math.round(spendingProgress)} percent of monthly spending plan used`}
+                  className="progress-track"
+                  role="progressbar"
+                  aria-valuemax={100}
+                  aria-valuemin={0}
+                  aria-valuenow={Math.round(spendingProgress)}
+                >
+                  <span className={spending > monthlyLimit ? "over-limit" : ""} style={{ width: `${spendingProgress}%` }} />
+                </div>
+                <p className={spending > monthlyLimit ? "plan-status over-limit-text" : "plan-status"}>
+                  {spending > monthlyLimit
+                    ? `${formatMoney(spending - monthlyLimit, currency)} over your plan. Take a moment to review—this is information, not a judgment.`
+                    : `${formatMoney(monthlyLimit - spending, currency)} left in your plan for ${monthLabel}.`}
+                </p>
+              </>
+            ) : (
+              <p className="plan-status">Choose a monthly spending amount that feels realistic for you. You can change it anytime.</p>
+            )}
+            <form className="limit-form" onSubmit={saveMonthlyLimit}>
+              <label>
+                Monthly spending plan
+                <span className="money-input">
+                  <span>{currency}</span>
+                  <input
+                    min="0.01"
+                    onChange={(event) => setLimitDraft(event.target.value)}
+                    placeholder="e.g. 500"
+                    step="0.01"
+                    type="number"
+                    value={limitDraft}
+                  />
+                </span>
+              </label>
+              <button className="secondary-button" type="submit">Save plan</button>
+            </form>
+          </section>
+
+          <section className="budget-panel">
+            <div className="budget-panel-heading">
+              <div><p className="eyebrow">SPENDING SNAPSHOT</p><h2>Where it’s going</h2></div>
+            </div>
+            {spendingByCategory.length === 0 ? (
+              <p className="budget-empty-copy">Add an expense to see your spending categories here.</p>
+            ) : (
+              <div className="category-breakdown">
+                {spendingByCategory.map((item) => (
+                  <div className="category-row" key={item.name}>
+                    <div className="category-label"><span>{item.name}</span><strong>{formatMoney(item.total, currency)}</strong></div>
+                    <div className="category-track"><span style={{ width: `${(item.total / spending) * 100}%` }} /></div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
+
+        <div className="budget-side-column">
+          <section className="budget-panel add-entry-panel">
+            <div className="budget-panel-heading">
+              <div><p className="eyebrow">KEEP IT SIMPLE</p><h2>Add an entry</h2></div>
+            </div>
+            <form className="budget-entry-form" onSubmit={addEntry}>
+              <div className="entry-type-toggle">
+                <button
+                  className={entryType === "expense" ? "selected" : ""}
+                  onClick={() => {
+                    setEntryType("expense");
+                    setCategory(EXPENSE_CATEGORIES[0]);
+                  }}
+                  type="button"
+                >
+                  Expense
+                </button>
+                <button
+                  className={entryType === "income" ? "selected" : ""}
+                  onClick={() => {
+                    setEntryType("income");
+                    setCategory(INCOME_CATEGORIES[0]);
+                  }}
+                  type="button"
+                >
+                  Income
+                </button>
+              </div>
+              <label>
+                Amount
+                <span className="money-input">
+                  <span>{currency}</span>
+                  <input
+                    min="0.01"
+                    onChange={(event) => setAmount(event.target.value)}
+                    placeholder="0.00"
+                    required
+                    step="0.01"
+                    type="number"
+                    value={amount}
+                  />
+                </span>
+              </label>
+              <label>
+                Category
+                <select onChange={(event) => setCategory(event.target.value)} value={category}>
+                  {(entryType === "expense" ? EXPENSE_CATEGORIES : INCOME_CATEGORIES).map((name) => (
+                    <option key={name} value={name}>{name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                What was it for?
+                <input
+                  maxLength={100}
+                  onChange={(event) => setDescription(event.target.value)}
+                  placeholder="Optional note"
+                  value={description}
+                />
+              </label>
+              <label>
+                Date
+                <input
+                  onChange={(event) => setEntryDate(event.target.value)}
+                  required
+                  type="date"
+                  value={entryDate}
+                />
+              </label>
+              {formError && <p className="error-message" role="alert">{formError}</p>}
+              <button className="primary-button add-entry-button" type="submit">Add {entryType}</button>
+            </form>
+            <p className="budget-privacy">No bank connection. Your budget stays in this browser and isn’t sent to the AI.</p>
+          </section>
+        </div>
+      </div>
+
+      <section className="budget-panel transactions-panel">
+        <div className="budget-panel-heading transaction-heading">
+          <div><p className="eyebrow">YOUR ACTIVITY</p><h2>{monthLabel} entries</h2></div>
+          <span className="transaction-count">{monthEntries.length} {monthEntries.length === 1 ? "entry" : "entries"}</span>
+        </div>
+        {monthEntries.length === 0 ? (
+          <p className="budget-empty-copy">Nothing recorded yet. Start with one small entry—estimates are okay.</p>
+        ) : (
+          <div className="transaction-list">
+            {monthEntries.map((entry) => (
+              <article className="transaction-row" key={entry.id}>
+                <span className={`transaction-type-icon ${entry.type}`} aria-hidden="true">
+                  {entry.type === "income" ? "↓" : "↗"}
+                </span>
+                <div className="transaction-description">
+                  <strong>{entry.description || entry.category}</strong>
+                  <small>{entry.category} · {parseDate(entry.date).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
+                </div>
+                <strong className={`transaction-amount ${entry.type}`}>
+                  {entry.type === "income" ? "+" : "−"}{formatMoney(Number(entry.amount), currency)}
+                </strong>
+                <button
+                  aria-label={`Remove ${entry.description || entry.category} entry`}
+                  className="icon-button"
+                  onClick={() => setEntries((current) => current.filter((item) => item.id !== entry.id))}
+                >
+                  ×
+                </button>
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+      <p className="budget-disclaimer">A personal planning tool for everyday budgeting—not financial advice. Avoid entering bank details or sensitive information.</p>
+    </section>
+  );
+}
+
 function PlannerView() {
   const [tasks, setTasks] = useState(() => readList(TASK_STORAGE_KEY));
   const [title, setTitle] = useState("");
@@ -718,6 +1082,9 @@ export default function App() {
             <span aria-hidden="true">▦</span> Calendar
             {meetings.length > 0 && <span className="nav-count">{meetings.length}</span>}
           </button>
+          <button className={activeView === "budget" ? "nav-item active" : "nav-item"} onClick={() => setActiveView("budget")}>
+            <span aria-hidden="true">$</span> Student budget
+          </button>
           <button className={activeView === "planner" ? "nav-item active" : "nav-item"} onClick={() => setActiveView("planner")}>
             <span aria-hidden="true">✓</span> Study planner
           </button>
@@ -752,7 +1119,7 @@ export default function App() {
 
         <div className="sidebar-footer">
           <div className="profile-avatar" aria-hidden="true">S</div>
-          <div><strong>My workspace</strong><small>Personal study space</small></div>
+          <div><strong>My workspace</strong><small>Student wellbeing space</small></div>
           <span className="local-indicator" title="Saved on this device" />
         </div>
       </aside>
@@ -761,7 +1128,8 @@ export default function App() {
         <header className="main-topbar">
           <span className="breadcrumb">Workspace <span>/</span> {
             activeView === "chat" ? "AI assistant" :
-              activeView === "calendar" ? "Calendar" : "Study planner"
+              activeView === "calendar" ? "Calendar" :
+                activeView === "budget" ? "Student budget" : "Study planner"
           }</span>
           <span className="local-badge"><span /> Saved on this device</span>
         </header>
@@ -781,6 +1149,7 @@ export default function App() {
               onMeetingsChange={setMeetings}
             />
           )}
+          {activeView === "budget" && <BudgetView />}
           {activeView === "planner" && <PlannerView />}
         </div>
       </main>
