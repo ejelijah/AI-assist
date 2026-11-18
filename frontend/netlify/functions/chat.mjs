@@ -208,7 +208,7 @@ export async function handler(event) {
   const validationError = validateRequest(payload);
   if (validationError) return jsonResponse(422, { detail: validationError });
 
-  const apiKey = process.env.GROQ_API_KEY;
+  const apiKey = process.env.GROQ_API_KEY?.trim();
   if (!apiKey) {
     return jsonResponse(503, { detail: "Set GROQ_API_KEY to enable AI answers." });
   }

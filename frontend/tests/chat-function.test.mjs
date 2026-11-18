@@ -41,7 +41,7 @@ test("chat function returns a helpful error when the key is missing", async () =
 });
 
 test("chat function includes web sources and conversation history", async () => {
-  process.env.GROQ_API_KEY = "test-key";
+  process.env.GROQ_API_KEY = " test-key\n";
   let groqPayload;
   globalThis.fetch = async (input, options) => {
     if (String(input).startsWith("https://html.duckduckgo.com/")) {
