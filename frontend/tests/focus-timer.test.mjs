@@ -15,6 +15,7 @@ test("saved legacy focus state defaults to Pomodoro mode", () => {
   assert.equal(focus.mode, "pomodoro");
   assert.equal(focus.remainingSeconds, 900);
   assert.equal(focus.elapsedSeconds, 0);
+  assert.equal(normalizeFocusState(null).mode, "stopwatch");
 });
 
 test("stopwatch keeps counting beyond a Pomodoro and formats elapsed hours", () => {
@@ -57,7 +58,7 @@ test("reset records a completed stopwatch session and clears elapsed time", () =
 });
 
 test("Pomodoro mode still starts with its timed focus and break cycle", () => {
-  const started = transitionFocus(normalizeFocusState(null), { type: "start" }, 1_000);
+  const started = transitionFocus(normalizeFocusState({ mode: "pomodoro" }), { type: "start" }, 1_000);
   const breakTime = advanceFocus(started, 1_000 + FOCUS_DURATION * 1000);
 
   assert.equal(started.remainingSeconds, FOCUS_DURATION);
