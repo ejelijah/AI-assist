@@ -32,8 +32,8 @@ planner whose events and tasks are saved in the browser.
    ```
 
    Optional settings are `GROQ_BASE_URL` and `GROQ_MODEL`. Defaults are shown
-   in `.env.example`. The example file is a template and is not loaded
-   automatically; the backend reads these values from its environment.
+   in `.env.example`. It is only a template; the local backend loads values
+   from the root `.env` file.
 
 3. Start the Python API:
 
@@ -58,21 +58,25 @@ between devices.
 
 ## Deploy for a demo
 
-The frontend is deployed to Netlify and the FastAPI backend to Render. Netlify
+The frontend is deployed to Netlify and the FastAPI backend to Railway. Netlify
 builds the static React app; it does not keep the Python API running.
 
 1. Push the repository to GitHub.
-2. In Render, create a new Blueprint from the repository. Render reads
-   `render.yaml` and creates the API service. Set `GROQ_API_KEY` in the
-   service's environment settings using a newly created Groq key.
-3. In Netlify, import the same repository. `netlify.toml` configures the
+2. In Railway, create an empty project and add a service connected to the
+   repository. Set the service's **Root Directory** to `/backend`. Railway
+   detects the Python requirements there; set its start command to
+   `uvicorn main:app --host 0.0.0.0 --port $PORT`.
+3. Add `GROQ_API_KEY` in the Railway service's Variables, then generate a
+   public domain for the service.
+4. In Netlify, import the same repository. `netlify.toml` configures the
    frontend build. Set the build environment variable `VITE_API_URL` to the
-   Render service URL (for example, `https://studycompass-api.onrender.com`),
-   then deploy.
-4. Copy the Netlify production site origin (for example,
-   `https://your-site.netlify.app`) into Render's `FRONTEND_ORIGIN` setting and
-   redeploy the API. For multiple trusted origins, separate them with commas.
-5. Check `https://<your-render-service>/api/health` returns `{"status":"ok"}`,
+   Railway service URL (for example, `https://your-api.up.railway.app`), then
+   deploy.
+5. Copy the Netlify production site origin (for example,
+   `https://your-site.netlify.app`) into Railway's `FRONTEND_ORIGIN` variable
+   and redeploy the API. For multiple trusted origins, separate them with
+   commas.
+6. Check `https://<your-railway-service>/api/health` returns `{"status":"ok"}`,
    then test chat on the Netlify site.
 
 Never put `GROQ_API_KEY` in a `VITE_` variable, frontend file, or Git commit.
@@ -82,7 +86,6 @@ Never put `GROQ_API_KEY` in a `VITE_` variable, frontend file, or Git commit.
 
 - `backend/`: FastAPI endpoint, web search, and model integration
 - `frontend/`: React interface for chat, calendar, and daily planning
-- `render.yaml`: Render API service configuration
 - `netlify.toml`: Netlify frontend build configuration
 
 ## Important limitations
