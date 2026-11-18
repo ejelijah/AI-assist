@@ -56,28 +56,24 @@ to answer using those results. It requires internet access and an API key. The
 study planner stores tasks in that browser's local storage; it does not sync
 between devices.
 
-## Deploy for a demo
+## Deploy the whole app to Netlify
 
-The frontend is deployed to Netlify and the FastAPI backend to Railway. Netlify
-builds the static React app; it does not keep the Python API running.
+Netlify hosts the React frontend and the chat/health API as serverless
+functions. No separate backend host is needed.
 
-1. Push the repository to GitHub.
-2. In Railway, create an empty project and add a service connected to the
-   repository. Set the service's **Root Directory** to `/backend`. Railway
-   detects the Python requirements there; set its start command to
-   `uvicorn main:app --host 0.0.0.0 --port $PORT`.
-3. Add `GROQ_API_KEY` in the Railway service's Variables, then generate a
-   public domain for the service.
-4. In Netlify, import the same repository. `netlify.toml` configures the
-   frontend build. Set the build environment variable `VITE_API_URL` to the
-   Railway service URL (for example, `https://your-api.up.railway.app`), then
-   deploy.
-5. Copy the Netlify production site origin (for example,
-   `https://your-site.netlify.app`) into Railway's `FRONTEND_ORIGIN` variable
-   and redeploy the API. For multiple trusted origins, separate them with
-   commas.
-6. Check `https://<your-railway-service>/api/health` returns `{"status":"ok"}`,
-   then test chat on the Netlify site.
+1. Push the repository to GitHub and import it into Netlify. `netlify.toml`
+   sets the base directory to `frontend`, the build command to `npm run build`,
+   the publish directory to `dist`, and the functions directory.
+2. In the Netlify site's environment variables, add `GROQ_API_KEY` as a secret.
+   `GROQ_BASE_URL` and `GROQ_MODEL` are optional; the defaults are shown in
+   `.env.example`.
+3. Deploy the site. Check `https://<your-site>.netlify.app/api/health` returns
+   `{"status":"ok"}`, then test chat.
+
+The browser calls `/api/chat` on the same Netlify site; do not set a
+`VITE_API_URL` or expose `GROQ_API_KEY` through a `VITE_` variable. Netlify
+Functions have execution and usage limits, so this serverless setup is suited
+to the MVP/demo workload rather than sustained high traffic.
 
 Never put `GROQ_API_KEY` in a `VITE_` variable, frontend file, or Git commit.
 `.env` is ignored by Git; `.env.example` is a tracked template with no secret.
@@ -86,7 +82,8 @@ Never put `GROQ_API_KEY` in a `VITE_` variable, frontend file, or Git commit.
 
 - `backend/`: FastAPI endpoint, web search, and model integration
 - `frontend/`: React interface for chat, calendar, and daily planning
-- `netlify.toml`: Netlify frontend build configuration
+- `frontend/netlify/functions/`: Netlify chat and health API
+- `netlify.toml`: Netlify build, function, and API route configuration
 
 ## Important limitations
 

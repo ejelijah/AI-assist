@@ -3,8 +3,6 @@ import React, { useEffect, useRef, useState } from "react";
 const CHAT_STORAGE_KEY = "study-compass-chat-sessions-v1";
 const MEETING_STORAGE_KEY = "study-compass-meetings-v1";
 const TASK_STORAGE_KEY = "study-compass-tasks";
-const API_BASE_URL = (import.meta.env.VITE_API_URL || "http://127.0.0.1:8000")
-  .replace(/\/+$/, "");
 const SUGGESTIONS = [
   "Help me understand a difficult topic",
   "Help me plan my day around classes and study time",
@@ -647,7 +645,7 @@ export default function App() {
     }));
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/chat`, {
+      const response = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
