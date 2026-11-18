@@ -533,7 +533,9 @@ function BudgetView() {
     { currency: "USD", monthlyLimits: {} },
   ));
   const [selectedMonth, setSelectedMonth] = useState(() => dateKey(new Date()).slice(0, 7));
-  const [limitDraft, setLimitDraft] = useState("");
+  const [limitDraft, setLimitDraft] = useState(() =>
+    settings.monthlyLimits?.[dateKey(new Date()).slice(0, 7)]?.toString() || "",
+  );
   const [entryType, setEntryType] = useState("expense");
   const [category, setCategory] = useState(EXPENSE_CATEGORIES[0]);
   const [amount, setAmount] = useState("");
