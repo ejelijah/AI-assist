@@ -1,18 +1,29 @@
 import asyncio
 import os
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
 from ddgs import DDGS
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, field_validator
 
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
 app = FastAPI(title="Student AI Assistant API")
+
+allowed_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
+allowed_origins.extend(
+    origin.strip().rstrip("/")
+    for origin in os.getenv("FRONTEND_ORIGIN", "").split(",")
+    if origin.strip()
+)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=allowed_origins,
     allow_credentials=False,
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
