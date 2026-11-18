@@ -1,15 +1,17 @@
 
-# StudyCompass Student Daily Assistant
+# StudyCompass — Student Companion
 
-A student daily-life assistant that answers questions using web search results
-and provides links to its sources. It also includes a calendar and a daily
-planner whose events and tasks are saved in the browser.
+StudyCompass is a student-focused companion for finding useful resources,
+organizing daily activities, and staying focused. The MVP combines an AI
+assistant with web research, a shared dashboard, a local planner and calendar,
+focus sessions, and an isolated judge demo workspace.
 
 ## Requirements
 
 - Python 3.10+
 - Node.js 20+
 - A [GroqCloud API key](https://console.groq.com/keys)
+- npm
 
 ## Run locally
 
@@ -51,10 +53,10 @@ planner whose events and tasks are saved in the browser.
 
 5. Open the local URL printed by Vite (usually `http://localhost:5173`).
 
-The chat searches the web for relevant resources and asks the configured model
-to answer using those results. It requires internet access and an API key. The
-study planner stores tasks in that browser's local storage; it does not sync
-between devices.
+The assistant uses Groq for responses and DuckDuckGo for live web search.
+Suggested tasks and schedule blocks are shown for review; they are only saved
+after the student selects an add action. Planner, calendar, chat, demo, and
+focus-session data are stored in the browser and do not sync between devices.
 
 ## Deploy the whole app to Netlify
 
@@ -68,7 +70,7 @@ functions. No separate backend host is needed.
    `GROQ_BASE_URL` and `GROQ_MODEL` are optional; the defaults are shown in
    `.env.example`.
 3. Deploy the site. Check `https://<your-site>.netlify.app/api/health` returns
-   `{"status":"ok"}`, then test chat.
+   `{"status":"ok"}`, then test chat, task suggestions, and day planning.
 
 The browser calls `/api/chat` on the same Netlify site; do not set a
 `VITE_API_URL` or expose `GROQ_API_KEY` through a `VITE_` variable. Netlify
@@ -81,13 +83,16 @@ Never put `GROQ_API_KEY` in a `VITE_` variable, frontend file, or Git commit.
 ## Project layout
 
 - `backend/`: FastAPI endpoint, web search, and model integration
-- `frontend/`: React interface for chat, calendar, and daily planning
-- `frontend/netlify/functions/`: Netlify chat and health API
+- `frontend/src/components/`: dashboard, assistant, calendar, planner, and focus views
+- `frontend/src/lib/studyData.js`: shared storage, task, and demo-data helpers
+- `frontend/netlify/functions/`: Netlify chat/search and health API
 - `netlify.toml`: Netlify build, function, and API route configuration
 
 ## Important limitations
 
-This is an early prototype, not a substitute for checking course materials or
-professional advice. Search results and generated explanations can be
-incomplete or incorrect. Avoid entering sensitive personal information.
+This is an MVP, not a substitute for checking course materials or professional
+advice. Search results and generated explanations can be incomplete or
+incorrect. Review AI-proposed tasks and calendar blocks before saving them.
+Demo data is isolated from personal task and calendar storage. Avoid entering
+sensitive personal information.
 
