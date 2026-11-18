@@ -1,6 +1,6 @@
 import asyncio
 import os
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from ddgs import DDGS
@@ -19,8 +19,14 @@ app.add_middleware(
 )
 
 
+class ChatMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(min_length=1, max_length=4000)
+
+
 class ChatRequest(BaseModel):
     question: str = Field(min_length=1, max_length=1000)
+    history: list[ChatMessage] = Field(default_factory=list, max_length=20)
 
     @field_validator("question")
     @classmethod
@@ -59,7 +65,11 @@ def _search_web(question: str) -> list[dict[str, str]]:
     return sources
 
 
-async def _generate_answer(question: str, sources: list[dict[str, str]]) -> str:
+async def _generate_answer(
+    question: str,
+    sources: list[dict[str, str]],
+    history: list[ChatMessage],
+) -> str:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         raise HTTPException(
@@ -77,24 +87,30 @@ async def _generate_answer(question: str, sources: list[dict[str, str]]) -> str:
     if not source_text:
         source_text = "No useful web results were found."
 
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                "You are a helpful study assistant. Explain concepts clearly "
+                "and concisely. Use the supplied web results as evidence, "
+                "cite claims with source numbers like [1], and say when the "
+                "sources do not establish an answer. Do not invent citations. "
+                "Use the conversation history to understand follow-up questions."
+            ),
+        },
+        *[
+            {"role": message.role, "content": message.content}
+            for message in history
+        ],
+        {
+            "role": "user",
+            "content": f"Student question:\n{question}\n\nWeb results:\n{source_text}",
+        },
+    ]
     payload: dict[str, Any] = {
         "model": model,
         "temperature": 0.2,
-        "messages": [
-            {
-                "role": "system",
-                "content": (
-                    "You are a helpful study assistant. Explain concepts clearly "
-                    "and concisely. Use the supplied web results as evidence, "
-                    "cite claims with source numbers like [1], and say when the "
-                    "sources do not establish an answer. Do not invent citations."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Student question:\n{question}\n\nWeb results:\n{source_text}",
-            },
-        ],
+        "messages": messages,
     }
 
     try:
@@ -148,5 +164,5 @@ async def chat(request: ChatRequest) -> ChatResponse:
             detail="Web search failed. Check your internet connection and try again.",
         ) from exc
 
-    answer = await _generate_answer(request.question, sources)
+    answer = await _generate_answer(request.question, sources, request.history)
     return ChatResponse(answer=answer, sources=sources)
