@@ -1,15 +1,15 @@
 
-# Student AI Assistant
+# StudyCompass Student Daily Assistant
 
-A student-focused assistant that answers questions using web search results and
-provides links to its sources. The first version also includes a lightweight
-study planner whose tasks are saved in the browser.
+A student daily-life assistant that answers questions using web search results
+and provides links to its sources. It also includes a calendar and a daily
+planner whose events and tasks are saved in the browser.
 
 ## Requirements
 
 - Python 3.10+
 - Node.js 20+
-- An API key for an OpenAI-compatible chat-completions service
+- A [GroqCloud API key](https://console.groq.com/keys)
 
 ## Run locally
 
@@ -23,14 +23,14 @@ study planner whose tasks are saved in the browser.
    pip install -r requirements.txt
    ```
 
-2. Set the model API key in your shell. Keep it private; do not commit it:
+2. Set your Groq API key in the backend shell. Keep it private; do not commit it:
 
    ```sh
-   export OPENAI_API_KEY="your-key"
+   export GROQ_API_KEY="your-key"
    ```
 
-   Optional settings are `OPENAI_BASE_URL` and `OPENAI_MODEL`. Defaults are
-   shown in `.env.example`.
+   Optional settings are `GROQ_BASE_URL` and `GROQ_MODEL`. Defaults are shown
+   in `.env.example`.
 
 3. Start the Python API:
 

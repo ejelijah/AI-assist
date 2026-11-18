@@ -30,6 +30,16 @@ def test_invalid_chat_history_role_is_rejected() -> None:
     assert response.status_code == 422
 
 
+def test_chat_requires_groq_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.setattr(main, "_search_web", lambda question: [])
+
+    response = client.post("/api/chat", json={"question": "Help me plan my day"})
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Set GROQ_API_KEY to enable AI answers."
+
+
 def test_chat_passes_conversation_history_to_model(monkeypatch) -> None:
     captured: dict[str, object] = {}
 

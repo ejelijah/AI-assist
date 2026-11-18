@@ -70,15 +70,15 @@ async def _generate_answer(
     sources: list[dict[str, str]],
     history: list[ChatMessage],
 ) -> str:
-    api_key = os.getenv("OPENAI_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
         raise HTTPException(
             status_code=503,
-            detail="Set OPENAI_API_KEY to enable AI answers.",
+            detail="Set GROQ_API_KEY to enable AI answers.",
         )
 
-    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.getenv("GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     source_text = "\n\n".join(
         f"[{index}] {source['title']}\nURL: {source['url']}\n"
         f"Excerpt: {source['snippet']}"
