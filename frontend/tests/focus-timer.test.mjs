@@ -31,6 +31,17 @@ test("stopwatch keeps counting beyond a Pomodoro and formats elapsed hours", () 
   assert.equal(formatTimer(90 * 60), "01:30:00");
 });
 
+test("running stopwatch state resumes counting after it is restored", () => {
+  const started = transitionFocus(
+    normalizeFocusState({ mode: "stopwatch" }),
+    { type: "start" },
+    50_000,
+  );
+  const restored = normalizeFocusState(JSON.parse(JSON.stringify(started)));
+
+  assert.equal(elapsedSecondsAt(restored, 111_000), 61);
+});
+
 test("stopwatch pause and resume preserve elapsed time", () => {
   const started = transitionFocus(
     normalizeFocusState({ mode: "stopwatch" }),
